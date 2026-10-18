@@ -1,0 +1,63 @@
+import os, json, asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import google.generativeai as genai
+
+BOT_TOKEN = "APNA_TELEGRAM_BOT_TOKEN_YAHAN"
+GEMINI_API_KEY = "APNA_GEMINI_API_KEY_YAHAN"
+
+genai.configure(api_key=GEMINI_API_KEY)
+MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
+def get_quiz_data(subject):
+    prompt = f"Create 50 MCQs on {subject}. Return ONLY JSON array: [{{\"q\":\"Q?\",\"options\":[\"A\",\"B\",\"C\",\"D\"],\"answer\":0,\"explain\":\"why\"}}] No other text."
+    last_err = ""
+    for m_name in MODELS:
+        try:
+            print(f"Trying model: {m_name}")
+            model = genai.GenerativeModel(m_name)
+            res = model.generate_content(prompt)
+            txt = res.text
+            data = json.loads(txt[txt.find('['):txt.rfind(']')+1])
+            return data
+        except Exception as e:
+            last_err = str(e)
+            continue
+    raise Exception(f"All models failed: {last_err}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb = [
+        [InlineKeyboardButton("SSC GD 50 Quiz", callback_data="SSC GD")],
+        [InlineKeyboardButton("Railway 50 Quiz", callback_data="Railway NTPC")],
+        [InlineKeyboardButton("UPSC 50 Quiz", callback_data="UPSC Polity")],
+        [InlineKeyboardButton("Current Affairs 50 Quiz", callback_data="Current Affairs India 2026")]
+    ]
+    await update.message.reply_text("👑 Exam King Bot Ready!\nSubject chuno, 50 hidden quiz pao:", reply_markup=InlineKeyboardMarkup(kb))
+
+async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    subject = q.data
+    await q.message.reply_text(f"⏳ {subject} ke 50 quiz bana raha hu... AI model auto select ho raha hai.")
+    try:
+        quizzes = await asyncio.to_thread(get_quiz_data, subject)
+        await q.message.reply_text(f"✅ {len(quizzes)} quiz ready!")
+        for i, item in enumerate(quizzes, 1):
+            await context.bot.send_poll(
+                chat_id=q.message.chat_id,
+                question=f"{i}. {item['q']}"[:295],
+                options=item['options'],
+                type='quiz',
+                correct_option_id=int(item['answer']),
+                explanation=item.get('explain','')[:190],
+                is_anonymous=False
+            )
+            await asyncio.sleep(0.4)
+    except Exception as e:
+        await q.message.reply_text(f"Error: {e}")
+
+app = Application.builder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(on_button))
+print("Exam King Bot Running...")
+app.run_polling()
